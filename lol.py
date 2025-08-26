@@ -1,3 +1,6 @@
+# bot.py — GitHub fetcher with inline buttons (Aiogram v3)
+# Requires: pip install aiogram aiohttp
+
 import os
 import re
 import io
@@ -18,17 +21,18 @@ from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyb
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramUnauthorizedError, TelegramConflictError
 
 # ===================== Config =====================
 
-# RIGHT (hardcoded token, no envs)
-BOT_TOKEN = "8080027534:AAFAkuXRdKfWJlM4OsuyXPXA0nzF2hQZd94"
-GITHUB_TOKEN = None
+# HARD-CODE YOUR TOKEN HERE ↓↓↓ (must contain a colon :)
+BOT_TOKEN = "8080027534:AAFaKuXRDkfVWlM4osuyXPXAOnzF2hQZd94"
+GITHUB_TOKEN = None  # not required for public repos
 
 TELEGRAM_MAX_BYTES = 2 * 1024 * 1024 * 1024 - 5 * 1024 * 1024  # ~2GB safety
 
-if not BOT_TOKEN or ":" not in BOT_TOKEN:
-    raise SystemExit("BOT_TOKEN looks missing or malformed. Set BOT_TOKEN and rerun.")
+if not isinstance(BOT_TOKEN, str) or ":" not in BOT_TOKEN or len(BOT_TOKEN) < 20:
+    raise SystemExit("Set BOT_TOKEN correctly in bot.py (hardcode it as a quoted string with a ':').")
 
 # ===================== Bot Setup =====================
 
@@ -268,7 +272,6 @@ async def handle_github_link(m: Message, url: str):
                     branch = parts[i + 1]
                     rel_path = "/".join(parts[i + 2 : ])
                     raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{rel_path}"
-                    filename = unquote(Path(rel_path).name)
                     last_repo_ctx[m.chat.id] = (owner, repo, branch)
                     text = f"<b>{owner}/{repo}</b>\nFile: <code>{rel_path}</code>\nBranch: <code>{branch}</code>"
                     kb = main_menu_kb(f"{owner}|{repo}|{branch}|{rel_path}", has_tree=True, has_blob=True)
@@ -332,7 +335,7 @@ async def on_github_link(m: Message):
             "❌ Failed.\n"
             f"<code>{msg[:800]}</code>\n\n"
             "• Check the link and access.\n"
-            "• For private repos, set <code>GITHUB_TOKEN</code>."
+            "• For private repos, set a GitHub token (not required for public)."
         )
 
 # ---- Callbacks ----
@@ -430,7 +433,6 @@ async def cb_branches(cq: CallbackQuery):
 @router.callback_query(F.data.startswith("setbranch|"))
 async def cb_setbranch(cq: CallbackQuery):
     _, owner, repo, new_branch, rel_path = cq.data.split("|", 4)
-    text = ""
     if rel_path:
         text = f"<b>{owner}/{repo}</b>\nPath: <code>{rel_path}</code>\nBranch: <code>{new_branch}</code>"
     else:
@@ -446,7 +448,18 @@ async def main():
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
     dp.include_router(router)
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    except TelegramUnauthorizedError:
+        raise SystemExit(
+            "Unauthorized: your BOT_TOKEN is invalid/revoked. "
+            "Create a new token with @BotFather and paste it into bot.py."
+        )
+    except TelegramConflictError:
+        raise SystemExit(
+            "Conflict: another instance is running (getUpdates). "
+            "Stop other processes or webhooks before starting this bot."
+        )
 
 if __name__ == "__main__":
     asyncio.run(main())
