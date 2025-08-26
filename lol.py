@@ -1,15 +1,13 @@
 # bot.py — GitHub fetcher with inline buttons (Aiogram v3)
-# Requires: pip install aiogram aiohttp
+# Usage: pip install --upgrade aiogram aiohttp ; python3 bot.py
 
-import os
 import re
-import io
 import asyncio
 import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -25,23 +23,20 @@ from aiogram.exceptions import TelegramUnauthorizedError, TelegramConflictError
 
 # ===================== Config =====================
 
-# HARD-CODE YOUR TOKEN HERE ↓↓↓ (must contain a colon :)
+# Your token hardcoded (must contain a colon)
 BOT_TOKEN = "8080027534:AAFaKuXRDkfVWlM4osuyXPXAOnzF2hQZd94"
-GITHUB_TOKEN = None  # not required for public repos
+GITHUB_TOKEN = None  # optional, not needed for public repos
 
 TELEGRAM_MAX_BYTES = 2 * 1024 * 1024 * 1024 - 5 * 1024 * 1024  # ~2GB safety
 
 if not isinstance(BOT_TOKEN, str) or ":" not in BOT_TOKEN or len(BOT_TOKEN) < 20:
-    raise SystemExit("Set BOT_TOKEN correctly in bot.py (hardcode it as a quoted string with a ':').")
-
-# ===================== Bot Setup =====================
+    raise SystemExit("Set BOT_TOKEN correctly in bot.py (quoted string with a ':').")
 
 router = Router()
 
 # ===================== Helpers =====================
 
 GH_API = "https://api.github.com"
-
 GITHUB_URL_RE = re.compile(
     r"(https?://(?:raw\.githubusercontent\.com|github\.com|codeload\.github\.com)/\S+)",
     re.IGNORECASE,
@@ -58,7 +53,8 @@ def split_path(url: str):
     parts = [x for x in p.path.split("/") if x]
     return p, parts
 
-async def aiohttp_session():
+# NOTE: made this a NORMAL function so `async with aiohttp_session()` works.
+def aiohttp_session():
     headers = {"User-Agent": "TelegramGitHubFetcher/1.0 (+bot)"}
     if GITHUB_TOKEN:
         headers["Authorization"] = f"token {GITHUB_TOKEN}"
@@ -73,7 +69,7 @@ async def download_stream(session: aiohttp.ClientSession, url: str, dest_path: P
             raise RuntimeError(f"HTTP {r.status} while GET {url}: {text[:200]}")
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         with dest_path.open("wb") as f:
-            async for chunk in r.content.iter_chunked(1 << 20):  # 1MB
+            async for chunk in r.content.iter_chunked(1 << 20):
                 f.write(chunk)
     return dest_path
 
@@ -118,7 +114,6 @@ async def fetch_repo_zip(m: Message, session: aiohttp.ClientSession, owner: str,
     out = tmp / build_repo_zip_name(owner, repo, branch)
     await download_stream(session, zip_url, out)
     await send_file(m, out, caption=f"<b>{owner}/{repo}</b> (branch: <code>{branch}</code>)")
-    # cleanup
     try:
         for p in tmp.rglob("*"):
             if p.is_file():
@@ -172,7 +167,6 @@ async def fetch_folder(m: Message, session: aiohttp.ClientSession, owner: str, r
     zip_out = tmp_root / safe_name(f"{owner}-{repo}-{folder_path or 'root'}-{branch}-{now_stamp()}.zip")
     zip_directory(dl_root, zip_out)
     await send_file(m, zip_out, caption=f"<b>{owner}/{repo}</b> / <code>{folder_path or ''}</code> (branch: <code>{branch}</code>)")
-
     try:
         for p in tmp_root.rglob("*"):
             if p.is_file():
@@ -188,11 +182,9 @@ async def fetch_folder(m: Message, session: aiohttp.ClientSession, owner: str, r
 class AskFilePath(StatesGroup):
     waiting_path = State()
 
-# chat_id -> (owner, repo, branch)
-last_repo_ctx: dict[int, tuple[str, str, str]] = {}
+last_repo_ctx: dict[int, tuple[str, str, str]] = {}  # chat_id -> (owner, repo, branch)
 
 def main_menu_kb(repo_id: str, has_tree: bool, has_blob: bool) -> InlineKeyboardMarkup:
-    # repo_id format: owner|repo|branch|path(optional)
     buttons = []
     if has_blob:
         buttons.append([InlineKeyboardButton(text="⬇️ Download File", callback_data=f"file|{repo_id}")])
@@ -237,7 +229,7 @@ async def handle_github_link(m: Message, url: str):
                 await m.answer(text, reply_markup=kb, parse_mode=ParseMode.HTML)
                 return
 
-            # Releases asset direct
+            # Release asset
             if "releases" in parts and "download" in parts:
                 name = safe_name(Path(p.path).name or f"{repo}-asset-{now_stamp()}")
                 tmp = Path(tempfile.mkdtemp(prefix="ghrel_"))
@@ -251,7 +243,7 @@ async def handle_github_link(m: Message, url: str):
                     pass
                 return
 
-            # archive link
+            # Archive link
             if "archive" in parts:
                 name = safe_name(Path(p.path).name or f"{repo}-archive-{now_stamp()}.zip")
                 tmp = Path(tempfile.mkdtemp(prefix="gharch_"))
@@ -265,20 +257,19 @@ async def handle_github_link(m: Message, url: str):
                     pass
                 return
 
-            # blob (single file)
+            # Single file
             if "blob" in parts:
                 i = parts.index("blob")
                 if len(parts) >= i + 3:
                     branch = parts[i + 1]
                     rel_path = "/".join(parts[i + 2 : ])
-                    raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{rel_path}"
                     last_repo_ctx[m.chat.id] = (owner, repo, branch)
                     text = f"<b>{owner}/{repo}</b>\nFile: <code>{rel_path}</code>\nBranch: <code>{branch}</code>"
                     kb = main_menu_kb(f"{owner}|{repo}|{branch}|{rel_path}", has_tree=True, has_blob=True)
                     await m.answer(text, reply_markup=kb, parse_mode=ParseMode.HTML)
                     return
 
-            # tree (folder) or tree root
+            # Folder / tree
             if "tree" in parts:
                 i = parts.index("tree")
                 if len(parts) == i + 2:
@@ -341,7 +332,6 @@ async def on_github_link(m: Message):
 # ---- Callbacks ----
 
 def parse_repo_id(repo_id: str):
-    # owner|repo|branch|path?
     parts = repo_id.split("|")
     owner = parts[0]
     repo = parts[1]
@@ -452,13 +442,13 @@ async def main():
         await dp.start_polling(bot)
     except TelegramUnauthorizedError:
         raise SystemExit(
-            "Unauthorized: your BOT_TOKEN is invalid/revoked. "
-            "Create a new token with @BotFather and paste it into bot.py."
+            "Unauthorized: your BOT_TOKEN is invalid or revoked. "
+            "Get a new token from @BotFather and paste it here."
         )
     except TelegramConflictError:
         raise SystemExit(
-            "Conflict: another instance is running (getUpdates). "
-            "Stop other processes or webhooks before starting this bot."
+            "Conflict: another instance of this bot is running (getUpdates). "
+            "Stop the other process or disable its webhook."
         )
 
 if __name__ == "__main__":
