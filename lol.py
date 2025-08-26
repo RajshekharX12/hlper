@@ -21,8 +21,10 @@ from aiogram.fsm.context import FSMContext
 
 # ===================== Config =====================
 
-BOT_TOKEN = os.getenv("8080027534:AAFaKuXRDkfVWlM4osuyXPXAOnzF2hQZd94")
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip() or None
+# RIGHT (hardcoded token, no envs)
+BOT_TOKEN = "8080027534:AAFAkuXRdKfWJlM4OsuyXPXA0nzF2hQZd94"
+GITHUB_TOKEN = None
+
 TELEGRAM_MAX_BYTES = 2 * 1024 * 1024 * 1024 - 5 * 1024 * 1024  # ~2GB safety
 
 if not BOT_TOKEN or ":" not in BOT_TOKEN:
